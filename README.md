@@ -1,4 +1,4 @@
-# Piper‑ObjC [![Build](https://github.com/IhorShevchuk/piper-objc/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/IhorShevchuk/piper-objc/actions/workflows/build.yml)
+# Piper‑ObjC [![Build](https://github.com/piper-tts-apps/piper-objc/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/piper-tts-apps/piper-objc/actions/workflows/build.yml)
 
 Swift implementation of the [Piper](https://github.com/rhasspy/piper) speech synthesis engine. While the core is now written in Swift, it maintains full compatibility with Objective‑C.
 
@@ -15,7 +15,7 @@ Swift implementation of the [Piper](https://github.com/rhasspy/piper) speech syn
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/IhorShevchuk/piper-objc.git", from: "0.2.15")
+    .package(url: "https://github.com/piper-tts-apps/piper-objc.git", from: "0.2.15")
 ]
 ```
 
