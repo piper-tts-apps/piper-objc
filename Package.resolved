@@ -14,8 +14,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/piper-tts-apps/piper1-gpl-spm.git",
       "state" : {
-        "revision" : "3f4a62e910b01e51cd7c49f6107b583f7e668058",
-        "version" : "0.1.20"
+        "revision" : "efb938712edddeb8d4c157fc428aa3b182c53388",
+        "version" : "0.1.21"
       }
     }
   ],

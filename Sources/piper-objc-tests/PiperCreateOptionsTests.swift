@@ -154,3 +154,39 @@ struct PiperCreateWithOptionsMigrationTests {
         #expect(opts.g2pwModelDir == "/tmp/g2pw")
     }
 }
+
+@Suite("PiperCreateOptions OpenJTalk Tests", .serialized)
+struct PiperCreateOptionsOpenJTalkTests {
+
+    init() {
+        Bundle.setupSwizzling()
+    }
+
+    @Test("openjtalkDictDir defaults to nil")
+    func testOpenJTalkDictDirDefaultsToNil() {
+        let opts = PiperCreateOptions(modelPath: "/tmp/model.onnx")
+        #expect(opts.openjtalkDictDir == nil)
+    }
+
+    @Test("Init with all fields stores openjtalkDictDir")
+    func testInitStoresOpenJTalkDictDir() {
+        let opts = PiperCreateOptions(
+            modelPath: "/voices/ja_JP/model.onnx",
+            configPath: "/voices/ja_JP/model.onnx.json",
+            espeakDataPath: "/data/espeak-ng-data",
+            dataDir: "/data",
+            g2pwModelDir: "/data/g2pw",
+            openjtalkDictDir: "/voices/ja_JP/openjtalk"
+        )
+        #expect(opts.modelPath == "/voices/ja_JP/model.onnx")
+        #expect(opts.g2pwModelDir == "/data/g2pw")
+        #expect(opts.openjtalkDictDir == "/voices/ja_JP/openjtalk")
+    }
+
+    @Test("openjtalkDictDir can be changed after init")
+    func testOpenJTalkDictDirMutability() {
+        let opts = PiperCreateOptions(modelPath: "/tmp/model.onnx")
+        opts.openjtalkDictDir = "/tmp/openjtalk"
+        #expect(opts.openjtalkDictDir == "/tmp/openjtalk")
+    }
+}

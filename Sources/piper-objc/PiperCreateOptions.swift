@@ -23,21 +23,28 @@ public class PiperCreateOptions: NSObject {
     /// Directory should contain MONOPHONIC_CHARS.txt (Phase 1) and/or char_bopomofo_dict.json etc.
     public var g2pwModelDir: String?
 
+    /// Path to OpenJTalk dictionary directory for Japanese, or nil for auto-discovery.
+    /// Directory should contain sys.dic, matrix.bin, char.bin and unk.dic
+    /// (the pyopenjtalk-plus dictionary the Japanese voices were trained with).
+    public var openjtalkDictDir: String?
+
     @objc public init(modelPath: String,
                        configPath: String? = nil,
                        espeakDataPath: String? = nil,
                        dataDir: String? = nil,
-                       g2pwModelDir: String? = nil) {
+                       g2pwModelDir: String? = nil,
+                       openjtalkDictDir: String? = nil) {
         self.modelPath = modelPath
         self.configPath = configPath
         self.espeakDataPath = espeakDataPath
         self.dataDir = dataDir
         self.g2pwModelDir = g2pwModelDir
+        self.openjtalkDictDir = openjtalkDictDir
         super.init()
     }
 
     /// Convenience for ObjC where you only have model + config
     @objc public convenience init(modelPath: String, configPath: String?) {
-        self.init(modelPath: modelPath, configPath: configPath, espeakDataPath: nil, dataDir: nil, g2pwModelDir: nil)
+        self.init(modelPath: modelPath, configPath: configPath, espeakDataPath: nil, dataDir: nil, g2pwModelDir: nil, openjtalkDictDir: nil)
     }
 }
