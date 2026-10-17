@@ -31,6 +31,7 @@ public class Piper: NSObject {
     private let espeakData: String
     private let dataDir: String?
     private let g2pwModelDir: String?
+    private let openjtalkDictDir: String?
 
     private let dispatchQueue: DispatchQueue = {
         DispatchQueue(label: "\(Piper.self).main", qos: .userInteractive)
@@ -120,7 +121,7 @@ public class Piper: NSObject {
         }
     }
 
-    private static func makeSynthesizer(modelPath: String, configPath: String?, espeakData: String, dataDir: String? = nil, g2pwDir: String? = nil) throws -> OpaquePointer {
+    private static func makeSynthesizer(modelPath: String, configPath: String?, espeakData: String, dataDir: String? = nil, g2pwDir: String? = nil, openjtalkDir: String? = nil) throws -> OpaquePointer {
         try validateCreationInputs(modelPath: modelPath, configPath: configPath)
 
         var opts = piper_create_options()
@@ -130,6 +131,7 @@ public class Piper: NSObject {
         opts.espeak_data_path = nil
         opts.g2pw_model_dir = nil
         opts.data_dir = nil
+        opts.openjtalk_dict_dir = nil
 
         func withOptionalCString<T>(_ str: String?, _ body: (UnsafePointer<CChar>?) -> T) -> T {
             guard let s = str, !s.isEmpty else { return body(nil) }
@@ -141,13 +143,16 @@ public class Piper: NSObject {
                 withOptionalCString(espeakData) { espeakC in
                     withOptionalCString(dataDir) { dataDirC in
                         withOptionalCString(g2pwDir) { g2pwC in
-                            var mutableOpts = opts
-                            mutableOpts.model_path = modelC
-                            mutableOpts.config_path = configC
-                            mutableOpts.espeak_data_path = espeakC
-                            mutableOpts.data_dir = dataDirC
-                            mutableOpts.g2pw_model_dir = g2pwC
-                            return piper_create_with_options(&mutableOpts)
+                            withOptionalCString(openjtalkDir) { openjtalkC in
+                                var mutableOpts = opts
+                                mutableOpts.model_path = modelC
+                                mutableOpts.config_path = configC
+                                mutableOpts.espeak_data_path = espeakC
+                                mutableOpts.data_dir = dataDirC
+                                mutableOpts.g2pw_model_dir = g2pwC
+                                mutableOpts.openjtalk_dict_dir = openjtalkC
+                                return piper_create_with_options(&mutableOpts)
+                            }
                         }
                     }
                 }
@@ -176,7 +181,8 @@ public class Piper: NSObject {
                                    configPath: configPath,
                                    espeakData: espeakPath,
                                    dataDir: options.dataDir,
-                                   g2pwDir: options.g2pwModelDir)
+                                   g2pwDir: options.g2pwModelDir,
+                                   openjtalkDir: options.openjtalkDictDir)
     }
 
     func recreateSynthesizer() {
@@ -186,7 +192,8 @@ public class Piper: NSObject {
                                                 configPath: configPath.isEmpty ? nil : configPath,
                                                 espeakData: espeakData,
                                                 dataDir: dataDir,
-                                                g2pwDir: g2pwModelDir)
+                                                g2pwDir: g2pwModelDir,
+                                                openjtalkDir: openjtalkDictDir)
     }
     
     private func releaseSynthesizer() {
@@ -221,6 +228,7 @@ public class Piper: NSObject {
         self.espeakData = espeakResolved
         self.dataDir = options.dataDir
         self.g2pwModelDir = options.g2pwModelDir
+        self.openjtalkDictDir = options.openjtalkDictDir
         super.init()
         self.operationQueue.name = "\(type(of: self))Queue"
 
@@ -229,7 +237,7 @@ public class Piper: NSObject {
         setupMemoryPressureMonitoring()
     }
 
-    public init(modelPath: String, configPath: String, espeakNGData: String, dataDir: String? = nil, g2pwModelDir: String? = nil) throws {
+    public init(modelPath: String, configPath: String, espeakNGData: String, dataDir: String? = nil, g2pwModelDir: String? = nil, openjtalkDictDir: String? = nil) throws {
         // Fail fast for missing model – mirrors options path and avoids espeak bundle work when doomed
         try Self.validateCreationInputs(modelPath: modelPath, configPath: configPath.isEmpty ? nil : configPath)
 
@@ -237,12 +245,14 @@ public class Piper: NSObject {
                                       configPath: configPath.isEmpty ? nil : configPath,
                                       espeakDataPath: espeakNGData.isEmpty ? nil : espeakNGData,
                                       dataDir: dataDir,
-                                      g2pwModelDir: g2pwModelDir)
+                                      g2pwModelDir: g2pwModelDir,
+                                      openjtalkDictDir: openjtalkDictDir)
         self.modelPath = modelPath
         self.configPath = configPath
         self.espeakData = espeakNGData.isEmpty ? Piper.ensureEspeakLibDataInstalled() : espeakNGData
         self.dataDir = dataDir
         self.g2pwModelDir = g2pwModelDir
+        self.openjtalkDictDir = openjtalkDictDir
         super.init()
         self.operationQueue.name = "\(type(of: self))Queue"
 
@@ -512,7 +522,8 @@ public class Piper: NSObject {
                                                             configPath: configPath.isEmpty ? nil : configPath,
                                                             espeakData: espeakData,
                                                             dataDir: dataDir,
-                                                            g2pwDir: g2pwModelDir)
+                                                            g2pwDir: g2pwModelDir,
+                                                            openjtalkDir: openjtalkDictDir)
                 }
 
                 guard synthesizer != nil else {
