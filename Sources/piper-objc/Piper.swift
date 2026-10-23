@@ -107,7 +107,16 @@ public class Piper: NSObject {
             throw PiperError(code: .modelPathMissing)
         }
         if !FileManager.default.fileExists(atPath: modelPath) {
-            throw PiperError(code: .modelFileMissing, path: modelPath)
+            // Splits-only voices (issue #94): libpiper derives
+            // <stem>.encoder.onnx / <stem>.decoder.onnx from the model
+            // path and loads those instead, so the full model file may
+            // be absent when both parts exist.
+            let stem = (modelPath as NSString).deletingPathExtension
+            let fm = FileManager.default
+            if !fm.fileExists(atPath: stem + ".encoder.onnx") ||
+                !fm.fileExists(atPath: stem + ".decoder.onnx") {
+                throw PiperError(code: .modelFileMissing, path: modelPath)
+            }
         }
         guard let configPath, !configPath.isEmpty else { return }
         if !FileManager.default.fileExists(atPath: configPath) {
