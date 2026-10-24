@@ -42,6 +42,44 @@ struct PiperErrorTests {
         }
     }
 
+    @Test("Missing model file with both split parts passes the model check")
+    func missingModelWithSplitPartsPassesModelCheck() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("piper-splits-only-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for name in ["model.encoder.onnx", "model.decoder.onnx"] {
+            FileManager.default.createFile(atPath: dir.appendingPathComponent(name).path,
+                                           contents: Data("dummy".utf8))
+        }
+        let modelPath = dir.appendingPathComponent("model.onnx").path
+        let missingConfig = dir.appendingPathComponent("model.onnx.json").path
+        let opts = PiperCreateOptions(modelPath: modelPath, configPath: missingConfig)
+        // Splits-only voice (issue #94): libpiper loads the split parts
+        // derived from the model path, so validation must not throw
+        // modelFileMissing for the absent anchor. The next check in
+        // line - the missing config - is what must throw instead, which
+        // also keeps this test away from the native engine.
+        #expect(throws: PiperError(code: .configFileMissing, path: missingConfig)) {
+            try Piper(options: opts)
+        }
+    }
+
+    @Test("Missing model file with only one split part throws modelFileMissing")
+    func missingModelWithOneSplitPartThrows() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("piper-splits-partial-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("model.encoder.onnx").path,
+                                       contents: Data("dummy".utf8))
+        let modelPath = dir.appendingPathComponent("model.onnx").path
+        let opts = PiperCreateOptions(modelPath: modelPath)
+        #expect(throws: PiperError(code: .modelFileMissing, path: modelPath)) {
+            try Piper(options: opts)
+        }
+    }
+
     @Test("Missing config file throws configFileMissing")
     func missingConfigFileThrows() throws {
         let modelURL = FileManager.default.temporaryDirectory.appendingPathComponent("piper-error-test-model.onnx")
