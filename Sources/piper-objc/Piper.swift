@@ -26,6 +26,8 @@ public extension PiperDelegate {
 @objcMembers
 public class Piper: NSObject {
     private var synthesizer: OpaquePointer?
+    /// This instance's hold on the process-wide espeak gate; see EspeakProcessGate.
+    private let espeakSession = EspeakSessionLock()
     private let modelPath: String
     private let configPath: String
     private let espeakData: String
@@ -160,7 +162,18 @@ public class Piper: NSObject {
                                 mutableOpts.data_dir = dataDirC
                                 mutableOpts.g2pw_model_dir = g2pwC
                                 mutableOpts.openjtalk_dict_dir = openjtalkC
-                                return piper_create_with_options(&mutableOpts)
+                                return EspeakProcessGate.shared.withProcessLock {
+                                    // Deferred frees execute only here,
+                                    // immediately before this create
+                                    // re-initializes espeak - see
+                                    // EspeakProcessGate.
+                                    EspeakProcessGate.shared.drainDeferredFrees()
+                                    let created = piper_create_with_options(&mutableOpts)
+                                    if let created {
+                                        EspeakProcessGate.shared.registerLive(created)
+                                    }
+                                    return created
+                                }
                             }
                         }
                     }
@@ -210,7 +223,10 @@ public class Piper: NSObject {
 
         guard let syn = synthesizer else { return }
 
-        piper_free(syn)
+        // piper_free runs espeak_Terminate on process-global state: go
+        // through the gate, which defers the free while other instances
+        // are alive (see EspeakProcessGate).
+        EspeakProcessGate.shared.destroy(syn)
         synthesizer = nil
     }
 
@@ -273,7 +289,7 @@ public class Piper: NSObject {
     deinit {
         cancel()
         if let syn = synthesizer {
-            piper_free(syn)
+            EspeakProcessGate.shared.destroy(syn)
             synthesizer = nil
         }
         memoryPressureSource?.cancel()
@@ -555,8 +571,15 @@ public class Piper: NSObject {
                     nsRange = NSRange(location: NSNotFound, length: 0)
                 }
 
+                // Hold the process-wide espeak gate for this sentence's
+                // synthesize session (start ... final next). The defer
+                // releases on every exit from this sentence scope -
+                // completion, cancel, or error. See EspeakProcessGate.
+                espeakSession.acquireIfNotHeld()
+                defer { espeakSession.release() }
+
                 let sentenceStartByteOffset = self.totalSSMLBytesGenerated
-                
+
                 if piper_synthesize_start(synthesizer, sentence, &currentOptions) == PIPER_ERR_GENERIC {
                     // Sawyer 1.0.12 YouTube long post: one bad sentence (emoji/URL) aborted remaining 10+ sentences.
                     // Skip failed sentence instead of aborting entire long utterance.
