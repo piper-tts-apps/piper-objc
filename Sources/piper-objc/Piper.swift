@@ -44,6 +44,10 @@ public class Piper: NSObject {
     }()
     public var memoryThresholdBytes: UInt64? = nil
     private var totalSSMLBytesGenerated = 0
+    /// Sample rate of the most recent speech chunk, used to size pause
+    /// silence. Nil until the first speech chunk arrives, so leading
+    /// pauses are skipped rather than emitted at a guessed rate.
+    private var lastSpeechSampleRate: Int32?
     private let ssmlParser = SSMLParser()
     private var _status: PiperStatus = .created
     private let statusLock = NSLock()
@@ -252,6 +256,7 @@ public class Piper: NSObject {
     public func cancel() {
         status = .canceled
         totalSSMLBytesGenerated = 0
+        lastSpeechSampleRate = nil
         operationQueue.cancelAllOperations()
         // Don't block if we're already on the queue – avoids potential deadlock
         if OperationQueue.current != operationQueue {
@@ -318,8 +323,21 @@ public class Piper: NSObject {
             self.ssmlParser.parse(ssml: ssml) { [weak self] fragment in
                 guard let self = self, self.status == .rendering else { return }
                 autoreleasepool {
+                    // Pause nodes make no libpiper call. They emit silence
+                    // at the voice sample rate and advance the byte offset
+                    // by exactly their sample count, so markers after a
+                    // break do not drift. Leading pauses are skipped: no
+                    // speech chunk has established a sample rate yet.
+                    // Phoneme nodes synthesize their fallback text; the
+                    // phonemes field is not injected (see SSMLParser).
+                    if fragment.kind == .pause {
+                        self.deliverPause(milliseconds: fragment.pauseMs) { chunk in
+                            self.delegate?.piperDidReceiveSamples(chunk.samples, withSize: Int(chunk.num_samples))
+                        }
+                        return
+                    }
                     let options = self.getOptions(for: fragment, speakerId: speakerId)
-                    self.doSynthesize(text: fragment.text, options: options, ssmlFragment: fragment, onChunkReady: { chunk in
+                    self.doSynthesize(text: fragment.text, options: options, ssmlFragment: fragment, volume: fragment.volume, onChunkReady: { chunk in
                         self.delegate?.piperDidReceiveSamples(chunk.samples, withSize: Int(chunk.num_samples))
                     }, onMarkers: { markers in
                         if !markers.isEmpty {
@@ -450,35 +468,69 @@ public class Piper: NSObject {
         var options = piper_default_synthesize_options(synthesizer)
 
         let rate = fragment.lengthScale
-        let lengthScale: Float
+        let baseLengthScale: Float
 
-        // Distinguish AV rate (0.2-1.0, 0.5 normal) vs multiplier (0.5-2.0, 1.0 normal)
-        // 1.0 is ambiguous: AV fastest (0.253) vs multiplier normal (1.0).
-        // Since Apple normal is 0.5, 1.0 as AV fastest is rare; treat 1.0 as multiplier normal for UI safety.
-        // AV path: 0.2 <= rate < 1.0  (0.5 -> 1.0 speed -> length 1.0)
-        // Multiplier path: rate ==1.0, rate <0.2, rate >1.0  (1/rate)
-        if rate >= 0.2 && rate < 1.0 {
+        // SSML-lite multiplier path: a named rate is a rate multiplier,
+        // converted as 1/rate, never through the AV curve below, or
+        // "slow" (0.75) would come out faster.
+        if fragment.usesMultiplierPath {
+            baseLengthScale = rate <= 0 ? 1.0 : 1.0 / rate
+        } else if rate >= 0.2 && rate < 1.0 {
+            // Distinguish AV rate (0.2-1.0, 0.5 normal) vs multiplier (0.5-2.0, 1.0 normal)
+            // 1.0 is ambiguous: AV fastest (0.253) vs multiplier normal (1.0).
+            // Since Apple normal is 0.5, 1.0 as AV fastest is rare; treat 1.0 as multiplier normal for UI safety.
+            // AV path: 0.2 <= rate < 1.0  (0.5 -> 1.0 speed -> length 1.0)
             let speedRatio = Piper.speedRatio(for: rate)
-            lengthScale = max(0.1, min(1.0 / speedRatio, 10.0))
+            baseLengthScale = 1.0 / speedRatio
         } else if rate == 1.0 {
-            lengthScale = 1.0
+            baseLengthScale = 1.0
         } else {
             // Multiplier path: 0.5 slow => 2.0, 1.5 fast => 0.666, 2.0 double => 0.5
             // Also handles <0.2 and >1.0
             if rate <= 0 {
-                lengthScale = 1.0
+                baseLengthScale = 1.0
             } else {
-                lengthScale = max(0.1, min(1.0 / rate, 10.0))
+                baseLengthScale = 1.0 / rate
             }
         }
 
-        options.length_scale = lengthScale
+        // Emphasis is a rate factor: strong (0.85) slows speech, so it
+        // divides the rate, which multiplies the length_scale.
+        let emphasized = fragment.emphasisFactor > 0
+            ? baseLengthScale / fragment.emphasisFactor
+            : baseLengthScale
+        options.length_scale = max(0.1, min(emphasized, 10.0))
         options.speaker_id = speakerId
 
         return options
     }
 
-    private func doSynthesize(text: String, options: piper_synthesize_options, ssmlFragment: SSMLNode? = nil, onChunkReady: (piper_audio_chunk) -> Void, onMarkers: (([PiperSpeechMarker]) -> Void)? = nil) {
+    /// Emits `milliseconds` of silence at the voice sample rate through
+    /// `onChunk`, advancing totalSSMLBytesGenerated by the sample count
+    /// in bytes. Returns false (and emits nothing) when no speech chunk
+    /// has established a sample rate yet, i.e. for a leading pause.
+    /// The silence chunk is only valid for the duration of the onChunk
+    /// call, which is synchronous in both call sites, exactly like a
+    /// libpiper chunk buffer.
+    @discardableResult
+    private func deliverPause(milliseconds: Int, onChunk: (piper_audio_chunk) -> Void) -> Bool {
+        guard milliseconds > 0, let sampleRate = lastSpeechSampleRate else { return false }
+        let count = Int(Double(milliseconds) * Double(sampleRate) / 1000.0)
+        guard count > 0 else { return false }
+        let zeros = [Float](repeating: 0, count: count)
+        zeros.withUnsafeBufferPointer { buffer in
+            var chunk = piper_audio_chunk()
+            chunk.samples = buffer.baseAddress
+            chunk.num_samples = count
+            chunk.sample_rate = sampleRate
+            chunk.is_last = false
+            onChunk(chunk)
+        }
+        totalSSMLBytesGenerated += count * MemoryLayout<Float>.size
+        return true
+    }
+
+    private func doSynthesize(text: String, options: piper_synthesize_options, ssmlFragment: SSMLNode? = nil, volume: Float = 1.0, onChunkReady: (piper_audio_chunk) -> Void, onMarkers: (([PiperSpeechMarker]) -> Void)? = nil) {
         let sentences = PiperSentencesExtractor.extract(from: text)
         var currentOptions = options
         
@@ -541,8 +593,27 @@ public class Piper: NSObject {
                         // Break but keep any previously collected groups
                         if chunk.num_alignments == 0 { break }
                     }
-                    
-                    onChunkReady(chunk)
+                    if chunk.sample_rate != 0 {
+                        lastSpeechSampleRate = chunk.sample_rate
+                    }
+
+                    // SSML-lite prosody volume is post-synthesis gain on a
+                    // copy of the chunk. The libpiper buffer is never
+                    // mutated, and alignment grouping below still uses the
+                    // original chunk (same sample count, same alignments).
+                    if volume != 1.0, let samples = chunk.samples, chunk.num_samples > 0 {
+                        var gained = [Float](UnsafeBufferPointer(start: samples, count: Int(chunk.num_samples)))
+                        for i in gained.indices {
+                            gained[i] = max(-1.0, min(1.0, gained[i] * volume))
+                        }
+                        gained.withUnsafeBufferPointer { buffer in
+                            var delivered = chunk
+                            delivered.samples = buffer.baseAddress
+                            onChunkReady(delivered)
+                        }
+                    } else {
+                        onChunkReady(chunk)
+                    }
 
                     // ---- Alignment grouping (piper.h rule) ----
                     // Groups of repeated codepoints separated by 0 -> N ids & N alignments per phoneme
@@ -592,8 +663,12 @@ public class Piper: NSObject {
         self.ssmlParser.parse(ssml: ssml) { [weak self] fragment in
             guard let self = self, self.status == .rendering else { return }
             autoreleasepool {
+                if fragment.kind == .pause {
+                    self.deliverPause(milliseconds: fragment.pauseMs, onChunk: onChunkReady)
+                    return
+                }
                 let options = self.getOptions(for: fragment, speakerId: speakerId)
-                self.doSynthesize(text: fragment.text, options: options, ssmlFragment: fragment, onChunkReady: onChunkReady)
+                self.doSynthesize(text: fragment.text, options: options, ssmlFragment: fragment, volume: fragment.volume, onChunkReady: onChunkReady)
             }
         }
     }
