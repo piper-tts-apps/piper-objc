@@ -17,11 +17,14 @@ let package = Package(
         .library(name: "piper-player",
                  targets: [
                     "piper-player"
-                 ])
+                 ]),
+        .executable(name: "piper-cli", targets: ["piper-cli"])
     ],
     dependencies: [
+        // Upper bound is 0.1.24-exclusive: 0.1.24 removed `openjtalk_dict_dir`
+        // from `piper_create_options`, which piper-objc still uses.
         .package(url: "https://github.com/piper-tts-apps/piper1-gpl-spm.git",
-                 from: "0.1.22"),
+                 "0.1.22"..<"0.1.24"),
         .package(url: "https://github.com/piper-tts-apps/espeak-ng-spm.git",
                  from: "2026.09.11")
     ],
@@ -45,6 +48,13 @@ let package = Package(
             dependencies: [
                 .target(name: "piper-objc")
             ]
+        ),
+        .executableTarget(
+            name: "piper-cli",
+            dependencies: [
+                .target(name: "piper-objc")
+            ],
+            path: "Sources/piper-cli"
         ),
         .testTarget(
             name: "piper-objc-tests",
