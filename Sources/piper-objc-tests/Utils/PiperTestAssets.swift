@@ -102,8 +102,8 @@ class PiperTestAssets {
 
     // MARK: - Japanese assets
 
-    static let japaneseModelSubPath = "ja/ja_JA/hi_fi_captain/medium"
-    static let japaneseModelName = "ja_JA-hi_fi_captain-medium.onnx"
+    static let japaneseModelSubPath = "ja/ja_JP/hi_fi_captain/medium"
+    static let japaneseModelName = "ja_JP-hi_fi_captain-medium.onnx"
     static let japaneseModelURL = URL(string: "\(modelBase)/\(japaneseModelSubPath)/\(japaneseModelName)")!
     static let japaneseConfigURL = URL(string: "\(modelBase)/\(japaneseModelSubPath)/\(japaneseModelName).json")!
 

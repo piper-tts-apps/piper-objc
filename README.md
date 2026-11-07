@@ -106,6 +106,34 @@ if (piper == nil) {
 }];
 ```
 
+## Command-line tool
+
+`piper-cli` synthesizes text to a `.wav` file with the same engine the app
+uses, which is handy for reproducing app behaviour outside the app, comparing
+renders, and debugging a voice.
+
+Build it (macOS):
+
+```sh
+swift build -c release --product piper-cli
+```
+
+Use it:
+
+```sh
+.build/release/piper-cli \
+  --model /path/to/model.onnx \
+  --config /path/to/model.onnx.json \
+  --output /tmp/out.wav \
+  "Hello, world!"
+```
+
+The text can also come from a file (`--text-file <file>`) or stdin
+(`--stdin`). Pass `--espeak-data <dir>` to point at an espeak-ng-data
+directory; otherwise the bundled espeak data is used. `--ssml` treats the
+text as SSML (with `--speaker-id <n>` for multi-speaker models). Run
+`piper-cli --help` for the full usage.
+
 ## License
 
 GPL-2.0
