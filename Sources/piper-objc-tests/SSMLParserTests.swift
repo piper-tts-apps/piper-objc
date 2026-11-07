@@ -254,35 +254,39 @@ struct SSMLParserTests {
         #expect(abs(nodes[0].emphasisFactor - 0.85) < 0.01)
     }
 
-    @Test("say-as expands dates, times, and telephone numbers")
-    func testSayAs() {
+    @Test("say-as passes text through unexpanded for espeak to read in the voice language")
+    func testSayAsPassthrough() {
         let parser = SSMLParser()
         var date: [SSMLNode] = []
         parser.parse(ssml: "<say-as interpret-as=\"date\">2026-11-02</say-as>") { date.append($0) }
         #expect(date.count == 1)
-        #expect(date[0].text == "November second, twenty twenty six")
+        #expect(date[0].text == "2026-11-02")
 
         var time: [SSMLNode] = []
         parser.parse(ssml: "<say-as interpret-as=\"time\">10:05</say-as>") { time.append($0) }
-        #expect(time[0].text == "ten oh five")
+        #expect(time[0].text == "10:05")
 
         var phone: [SSMLNode] = []
         parser.parse(ssml: "<say-as interpret-as=\"telephone\">555-1234</say-as>") { phone.append($0) }
-        #expect(phone[0].text == "five five five one two three four")
+        #expect(phone[0].text == "555-1234")
 
         var ordinal: [SSMLNode] = []
         parser.parse(ssml: "<say-as interpret-as=\"ordinal\">3rd</say-as>") { ordinal.append($0) }
-        #expect(ordinal[0].text == "third")
+        #expect(ordinal[0].text == "3rd")
+
+        var cardinal: [SSMLNode] = []
+        parser.parse(ssml: "<say-as interpret-as=\"cardinal\">42</say-as>") { cardinal.append($0) }
+        #expect(cardinal[0].text == "42")
     }
 
-    @Test("say-as range points at the original text, not the expansion")
+    @Test("say-as range points at the original text")
     func testSayAsRange() {
         let parser = SSMLParser()
         let ssml = "<speak><say-as interpret-as=\"date\">2026-11-02</say-as></speak>"
         var nodes: [SSMLNode] = []
         parser.parse(ssml: ssml) { nodes.append($0) }
         #expect(nodes.count == 1)
-        #expect(nodes[0].text == "November second, twenty twenty six")
+        #expect(nodes[0].text == "2026-11-02")
         let range = nodes[0].ssmlRange
         #expect(range.location != 0 || range.length > 0)
         let start = ssml.index(ssml.startIndex, offsetBy: range.location)

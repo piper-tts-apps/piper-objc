@@ -10,7 +10,12 @@
 //    <prosody rate="x-slow|slow|medium|fast|x-fast"> (multiplier path, see below)
 //    <prosody volume="loud|soft|...|125%|0.8">
 //    <emphasis level="strong|moderate|reduced|none"> (rate factor, no pitch)
-//    <say-as interpret-as="characters|digits|telephone|cardinal|ordinal|date|time">
+//    <say-as> (parsed, but the inner text is NOT expanded - it passes
+//      through unchanged so espeak-ng reads numbers/dates in the
+//      voice's own language. English word expansion was removed from
+//      PR #21: its hardcoded English word lists would misread in
+//      non-English voices. Locale-aware expansion via Foundation
+//      spell-out is future work, not in this PR.)
 //    <sub alias="...">, <spell>, <p> (300 ms pause after the paragraph)
 //    <phoneme alphabet="ipa" ph="..."> (parsed, fallback text is spoken -
 //      libpiper cannot inject phonemes directly, see below)
@@ -54,7 +59,6 @@ public final class SSMLParser: NSObject {
         var volume: Float
         var emphasisFactor: Float
         var element: String
-        var interpretAs: String
         var subAlias: String?
         var phonemePh: String
         var pauseEmitted: Bool
@@ -84,7 +88,7 @@ public final class SSMLParser: NSObject {
         stack = [
             SSMLContext(text: "", rate: 0.5, usesMultiplierPath: false,
                         volume: 1.0, emphasisFactor: 1.0, element: "",
-                        interpretAs: "", subAlias: nil, phonemePh: "",
+                        subAlias: nil, phonemePh: "",
                         pauseEmitted: false)
         ]
 
@@ -117,7 +121,7 @@ extension SSMLParser: XMLParserDelegate {
 
         let parent = stack.last ?? SSMLContext(text: "", rate: 0.5, usesMultiplierPath: false,
                                                volume: 1.0, emphasisFactor: 1.0, element: "",
-                                               interpretAs: "", subAlias: nil, phonemePh: "",
+                                               subAlias: nil, phonemePh: "",
                                                pauseEmitted: false)
         let element = elementName.lowercased()
         var newContext = SSMLContext(
@@ -127,7 +131,6 @@ extension SSMLParser: XMLParserDelegate {
             volume: parent.volume,
             emphasisFactor: parent.emphasisFactor,
             element: element,
-            interpretAs: "",
             subAlias: nil,
             phonemePh: "",
             pauseEmitted: false
@@ -153,8 +156,6 @@ extension SSMLParser: XMLParserDelegate {
             let level = (attributeDict["level"] ?? "moderate").lowercased()
             let factor = Self.emphasisRates[level] ?? 0.95
             newContext.emphasisFactor = parent.emphasisFactor * factor
-        case "say-as":
-            newContext.interpretAs = attributeDict["interpret-as"] ?? ""
         case "sub":
             newContext.subAlias = attributeDict["alias"]
         case "phoneme":
@@ -264,14 +265,18 @@ private extension SSMLParser {
 
         // Transform the text for synthesis, but look the range up using
         // the original text, which is what actually appears in the source.
-        // Expanded text (say-as, sub, spell) does not appear verbatim, so
+        // Expanded text (sub, spell) does not appear verbatim, so
         // searching for it would fail and markers would be lost.
         let spokenText: String
         var kind: SSMLNodeKind = .text
         var phonemes: String? = nil
         switch context.element {
         case "say-as":
-            spokenText = SSMLNumberExpander.expandSayAs(originalText, interpretAs: context.interpretAs)
+            // Deliberately NOT expanded: the inner text passes through
+            // unchanged so espeak-ng reads numbers/dates in the voice's
+            // own language. See the header comment for why the English
+            // word expansion was removed from PR #21.
+            spokenText = originalText
         case "sub":
             spokenText = context.subAlias ?? originalText
         case "spell":
