@@ -21,10 +21,11 @@ let package = Package(
         .executable(name: "piper-cli", targets: ["piper-cli"])
     ],
     dependencies: [
-        // Upper bound is 0.1.24-exclusive: 0.1.24 removed `openjtalk_dict_dir`
-        // from `piper_create_options`, which piper-objc still uses.
+        // Upper bound is 0.1.26-exclusive: 0.1.24 removed `openjtalk_dict_dir`
+        // from `piper_create_options`, which piper-objc still uses; 0.1.25
+        // restored it (it includes the OHF-Voice/piper1-gpl#352 merge).
         .package(url: "https://github.com/piper-tts-apps/piper1-gpl-spm.git",
-                 "0.1.22"..<"0.1.24"),
+                 "0.1.22"..<"0.1.26"),
         .package(url: "https://github.com/piper-tts-apps/espeak-ng-spm.git",
                  from: "2026.09.11")
     ],
