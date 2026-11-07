@@ -187,4 +187,145 @@ struct SSMLParserTests {
         #expect(nodes.count == 1)
         #expect(nodes[0].lengthScale == 1.0, "Plain text fallback should be 1.0 multiplier normal, not 0.5")
     }
+
+    // MARK: - SSML-lite
+
+    @Test("break time emits a pause node between speech nodes")
+    func testBreakTime() {
+        let parser = SSMLParser()
+        var nodes: [SSMLNode] = []
+        parser.parse(ssml: "<speak>One <break time=\"500ms\"/> two</speak>") { nodes.append($0) }
+        #expect(nodes.count == 3)
+        #expect(nodes[0].kind == .text)
+        #expect(nodes[1].kind == .pause)
+        #expect(nodes[1].pauseMs == 500)
+        #expect(nodes[2].kind == .text)
+    }
+
+    @Test("break strength maps to milliseconds")
+    func testBreakStrength() {
+        let parser = SSMLParser()
+        var nodes: [SSMLNode] = []
+        parser.parse(ssml: "<speak>A <break strength=\"strong\"/> B</speak>") { nodes.append($0) }
+        #expect(nodes.count == 3)
+        #expect(nodes[1].kind == .pause)
+        #expect(nodes[1].pauseMs == 700)
+    }
+
+    @Test("named prosody rates use the multiplier path, not the AV curve")
+    func testNamedProsodyRatesMultiplierPath() {
+        let parser = SSMLParser()
+        var slow: [SSMLNode] = []
+        parser.parse(ssml: "<prosody rate=\"slow\">Slow</prosody>") { slow.append($0) }
+        #expect(slow.count == 1)
+        #expect(slow[0].usesMultiplierPath)
+        // Node keeps piper-objc's existing keyword value; getOptions
+        // converts it as 1 / 0.75 = 1.333 length_scale.
+        #expect(abs(slow[0].lengthScale - 0.75) < 0.01)
+
+        var fast: [SSMLNode] = []
+        parser.parse(ssml: "<prosody rate=\"fast\">Fast</prosody>") { fast.append($0) }
+        #expect(fast[0].usesMultiplierPath)
+        #expect(abs(fast[0].lengthScale - 1.5) < 0.01)
+
+        // Percent rates keep the legacy path, not the multiplier path.
+        var percent: [SSMLNode] = []
+        parser.parse(ssml: "<prosody rate=\"150%\">Fast</prosody>") { percent.append($0) }
+        #expect(!percent[0].usesMultiplierPath)
+        #expect(percent[0].lengthScale == 1.5)
+    }
+
+    @Test("prosody volume is a post-synthesis gain, not a rate")
+    func testProsodyVolume() {
+        let parser = SSMLParser()
+        var nodes: [SSMLNode] = []
+        parser.parse(ssml: "<prosody volume=\"loud\">Loud</prosody>") { nodes.append($0) }
+        #expect(nodes.count == 1)
+        #expect(abs(nodes[0].volume - 1.4) < 0.01)
+        #expect(nodes[0].lengthScale == 0.5, "Volume alone must not change the legacy rate")
+    }
+
+    @Test("emphasis is a rate factor on the node")
+    func testEmphasis() {
+        let parser = SSMLParser()
+        var nodes: [SSMLNode] = []
+        parser.parse(ssml: "<emphasis level=\"strong\">Important</emphasis>") { nodes.append($0) }
+        #expect(nodes.count == 1)
+        #expect(abs(nodes[0].emphasisFactor - 0.85) < 0.01)
+    }
+
+    @Test("say-as passes text through unexpanded for espeak to read in the voice language")
+    func testSayAsPassthrough() {
+        let parser = SSMLParser()
+        var date: [SSMLNode] = []
+        parser.parse(ssml: "<say-as interpret-as=\"date\">2026-11-02</say-as>") { date.append($0) }
+        #expect(date.count == 1)
+        #expect(date[0].text == "2026-11-02")
+
+        var time: [SSMLNode] = []
+        parser.parse(ssml: "<say-as interpret-as=\"time\">10:05</say-as>") { time.append($0) }
+        #expect(time[0].text == "10:05")
+
+        var phone: [SSMLNode] = []
+        parser.parse(ssml: "<say-as interpret-as=\"telephone\">555-1234</say-as>") { phone.append($0) }
+        #expect(phone[0].text == "555-1234")
+
+        var ordinal: [SSMLNode] = []
+        parser.parse(ssml: "<say-as interpret-as=\"ordinal\">3rd</say-as>") { ordinal.append($0) }
+        #expect(ordinal[0].text == "3rd")
+
+        var cardinal: [SSMLNode] = []
+        parser.parse(ssml: "<say-as interpret-as=\"cardinal\">42</say-as>") { cardinal.append($0) }
+        #expect(cardinal[0].text == "42")
+    }
+
+    @Test("say-as range points at the original text")
+    func testSayAsRange() {
+        let parser = SSMLParser()
+        let ssml = "<speak><say-as interpret-as=\"date\">2026-11-02</say-as></speak>"
+        var nodes: [SSMLNode] = []
+        parser.parse(ssml: ssml) { nodes.append($0) }
+        #expect(nodes.count == 1)
+        #expect(nodes[0].text == "2026-11-02")
+        let range = nodes[0].ssmlRange
+        #expect(range.location != 0 || range.length > 0)
+        let start = ssml.index(ssml.startIndex, offsetBy: range.location)
+        let end = ssml.index(start, offsetBy: range.length)
+        #expect(String(ssml[start..<end]) == "2026-11-02")
+    }
+
+    @Test("sub alias replaces the inner text, spell spaces letters")
+    func testSubAndSpell() {
+        let parser = SSMLParser()
+        var sub: [SSMLNode] = []
+        parser.parse(ssml: "<sub alias=\"Doctor\">Dr.</sub>") { sub.append($0) }
+        #expect(sub[0].text == "Doctor")
+
+        var spell: [SSMLNode] = []
+        parser.parse(ssml: "<spell>ABC</spell>") { spell.append($0) }
+        #expect(spell[0].text == "A B C")
+    }
+
+    @Test("phoneme keeps the fallback text and stores the phonemes")
+    func testPhonemeFallback() {
+        let parser = SSMLParser()
+        var nodes: [SSMLNode] = []
+        parser.parse(ssml: "<phoneme alphabet=\"ipa\" ph=\"təˈmeɪtoʊ\">tomato</phoneme>") { nodes.append($0) }
+        #expect(nodes.count == 1)
+        #expect(nodes[0].kind == .phoneme)
+        #expect(nodes[0].text == "tomato")
+        #expect(nodes[0].phonemes == "təˈmeɪtoʊ")
+    }
+
+    @Test("p adds a 300 ms pause after its content")
+    func testParagraphPause() {
+        let parser = SSMLParser()
+        var nodes: [SSMLNode] = []
+        parser.parse(ssml: "<speak><p>First.</p><p>Second.</p></speak>") { nodes.append($0) }
+        #expect(nodes.count == 4)
+        #expect(nodes[1].kind == .pause)
+        #expect(nodes[1].pauseMs == 300)
+        #expect(nodes[3].kind == .pause)
+        #expect(nodes[3].pauseMs == 300)
+    }
 }
