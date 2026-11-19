@@ -52,9 +52,8 @@ import piper_utils
                 continue
             }
             
-            let locationInSentence = sentence.distance(from: sentence.startIndex, to: wordRangeInSentence.lowerBound)
-            let length = sentence.distance(from: wordRangeInSentence.lowerBound, to: wordRangeInSentence.upperBound)
-            let wordNSRange = NSRange(location: sentenceNSRange.location + locationInSentence, length: length)
+            let local = NSRange(wordRangeInSentence, in: sentence)
+            let wordNSRange = NSRange(location: sentenceNSRange.location + local.location, length: local.length)
             let wordBytes = Int(Double(totalBytes) * (Double(word.count) / Double(totalCharacters)))
             markers.append(PiperSpeechMarker(range: wordNSRange, byteOffset: currentByteOffset, type: .word))
             currentByteOffset += wordBytes
@@ -170,10 +169,8 @@ import piper_utils
             guard let coreRangeInSentence = sentence.range(of: core, options: .literal, range: currentSearchStart..<sentence.endIndex) else {
                 continue
             }
-            let locationInSentence = sentence.distance(from: sentence.startIndex, to: coreRangeInSentence.lowerBound)
-            // Use NSString-based length for safety (handles emoji composed)
-            let nsLength = (core as NSString).length
-            let wordNSRange = NSRange(location: sentenceNSRange.location + locationInSentence, length: nsLength)
+            let local = NSRange(coreRangeInSentence, in: sentence)
+            let wordNSRange = NSRange(location: sentenceNSRange.location + local.location, length: local.length)
 
             // How many phoneme groups belong to this word?
             // Proportional distribution, ensures sum = realGroups.count
@@ -212,5 +209,28 @@ import piper_utils
         // Monotonicity guarantee: byte offsets already increasing because cumulativeSamples only increases
 
         return markers
+    }
+}
+
+extension PiperSpeechMarker {
+    /// Both timing paths produce offsets in the audio stream and ranges in
+    /// chunk-local UTF-16. Convert only the text ranges to provider coordinates.
+    static func markers(for sentence: String, source: SSMLChunk, startByteOffset: Int, totalBytes: Int,
+                        groups: [PiperAlignmentParser.PhonemeGroup]) -> [PiperSpeechMarker] {
+        let local = NSRange(location: 0, length: sentence.utf16.count)
+        let markers: [PiperSpeechMarker]
+        if groups.isEmpty {
+            markers = generateMarkers(for: sentence, sentenceNSRange: local, startByteOffset: startByteOffset,
+                                      totalBytes: totalBytes)
+        } else {
+            markers = generateMarkersWithAlignment(for: sentence, sentenceNSRange: local,
+                                                   startByteOffset: startByteOffset, groups: groups)
+        }
+        var chunk = source
+        return markers.compactMap { marker in
+            let range = marker.type == .sentence ? chunk.sourceRange : chunk.wordRange(for: marker.range)
+            guard let range else { return nil }
+            return PiperSpeechMarker(range: range, byteOffset: marker.byteOffset, type: marker.type)
+        }
     }
 }
