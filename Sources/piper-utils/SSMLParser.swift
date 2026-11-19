@@ -23,22 +23,23 @@ public final class SSMLParser: NSObject {
     
     private var stack: [SSMLContext] = []
     private var onNode: ((SSMLNode) -> Void)?
-    private var ssmlSource: String = ""
-    private var ssmlCurrentLocation: String.Index!
+    private var sourceCursor: XMLSourceCursor?
     
     // MARK: - Public API
     
     public func parse(ssml: String, onNode: @escaping (SSMLNode) -> Void) {
         self.onNode = onNode
-        defer { self.onNode = nil }
+        defer {
+            self.onNode = nil
+            self.sourceCursor = nil
+        }
         
         guard !ssml.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let data = ssml.data(using: .utf8) else {
             return
         }
         
-        ssmlSource = ssml
-        ssmlCurrentLocation = ssmlSource.startIndex
+        sourceCursor = XMLSourceCursor(ssml)
         
         stack = [
             SSMLContext(text: "", rate: 0.5)
@@ -69,7 +70,7 @@ extension SSMLParser: XMLParserDelegate {
                        qualifiedName qName: String?,
                        attributes attributeDict: [String : String] = [:]) {
         
-        flushCurrentText()
+        flushCurrentText(before: qName ?? elementName, closing: false)
 
         let parent = stack.last ?? SSMLContext(text: "", rate: 0.5)
         
@@ -95,7 +96,7 @@ extension SSMLParser: XMLParserDelegate {
                        namespaceURI: String?,
                        qualifiedName qName: String?) {
         
-        flushCurrentText()
+        flushCurrentText(before: qName ?? elementName, closing: true)
         
         if stack.count > 1 {
             stack.removeLast()
@@ -107,34 +108,16 @@ extension SSMLParser: XMLParserDelegate {
 
 private extension SSMLParser {
     
-    func flushCurrentText() {
+    func flushCurrentText(before element: String? = nil, closing: Bool = false) {
         guard !stack.isEmpty else { return }
         
-        var text = stack[stack.count - 1].text
-        
-        text = text.precomposedStringWithCanonicalMapping
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            stack[stack.count - 1].text = ""
-            return
-        }
-        
-        var nsRange = NSRange(location: 0, length: 0)
-        
-        if let range = ssmlSource.range(of: text, options: [], range: ssmlCurrentLocation..<ssmlSource.endIndex) {
-            let location = ssmlSource.distance(from: ssmlSource.startIndex, to: range.lowerBound)
-            let length = ssmlSource.distance(from: range.lowerBound, to: range.upperBound)
-            nsRange = NSRange(location: location, length: length)
-            ssmlCurrentLocation = range.upperBound
-        }
-        
-        let node = SSMLNode(
-            text: text,
-            lengthScale: stack[stack.count - 1].rate,
-            ssmlRange: nsRange
-        )
-        
-        onNode?(node)
+        let context = stack[stack.count - 1]
         stack[stack.count - 1].text = ""
+        let index = element.flatMap { sourceCursor?.beforeElement($0, closing: closing, text: context.text) }
+        guard !context.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let node = SSMLNode(decoded: context.text, lengthScale: context.rate, index: index)
+        onNode?(node)
     }
     
     func parseRate(_ value: String) -> Float {

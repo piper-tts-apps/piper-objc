@@ -516,7 +516,7 @@ public class Piper: NSObject {
         let sentences = PiperSentencesExtractor.extract(from: text)
         var currentOptions = options
         
-        var searchStartIndex = text.startIndex
+        var markerCursor = 0
 
         for sentence in sentences {
             autoreleasepool {
@@ -541,19 +541,7 @@ public class Piper: NSObject {
                 }
                 if status != .rendering { return }
 
-                let nsRange: NSRange
-                if let ssmlFragment, ssmlFragment.ssmlRange.location != NSNotFound {
-                    if let sentenceRange = text.range(of: sentence, options: [], range: searchStartIndex..<text.endIndex) {
-                        let locationInFragment = text.distance(from: text.startIndex, to: sentenceRange.lowerBound)
-                        let length = text.distance(from: sentenceRange.lowerBound, to: sentenceRange.upperBound)
-                        nsRange = NSRange(location: ssmlFragment.ssmlRange.location + locationInFragment, length: length)
-                        searchStartIndex = sentenceRange.upperBound
-                    } else {
-                        nsRange = NSRange(location: NSNotFound, length: 0)
-                    }
-                } else {
-                    nsRange = NSRange(location: NSNotFound, length: 0)
-                }
+                let sourceChunk = onMarkers == nil ? nil : ssmlFragment?.locateChunk(sentence, from: &markerCursor)
 
                 let sentenceStartByteOffset = self.totalSSMLBytesGenerated
                 
@@ -609,19 +597,10 @@ public class Piper: NSObject {
                 
                 self.totalSSMLBytesGenerated += sentenceTotalBytes
                 
-                if nsRange.location != NSNotFound, let onMarkers {
-                    if !sentenceAlignmentGroups.isEmpty {
-                        let markers = PiperSpeechMarker.generateMarkersWithAlignment(
-                            for: sentence,
-                            sentenceNSRange: nsRange,
-                            startByteOffset: sentenceStartByteOffset,
-                            groups: sentenceAlignmentGroups
-                        )
-                        onMarkers(markers)
-                    } else {
-                        let markers = PiperSpeechMarker.generateMarkers(for: sentence, sentenceNSRange: nsRange, startByteOffset: sentenceStartByteOffset, totalBytes: sentenceTotalBytes)
-                        onMarkers(markers)
-                    }
+                if let sourceChunk, let onMarkers {
+                    onMarkers(PiperSpeechMarker.markers(for: sentence, source: sourceChunk,
+                        startByteOffset: sentenceStartByteOffset, totalBytes: sentenceTotalBytes,
+                        groups: sentenceAlignmentGroups))
                 }
             }
         }

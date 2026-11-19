@@ -155,6 +155,39 @@ struct PiperIntegrationTests {
         #expect(wordMarkers.map { $0.range } == expectedWordRanges, "Word ranges should be relative to the full SSML string")
     }
 
+    @Test("Public SSML synthesis sends word ranges in the serialized provider request")
+    func testEscapedProviderWordMarkers() async throws {
+        let piper = try Piper(modelPath: PiperTestAssets.modelPath, configPath: PiperTestAssets.configPath,
+                              espeakNGData: PiperTestAssets.espeakNGDataPath)
+        let delegate = TestPiperDelegate()
+        piper.delegate = delegate
+        let encoded = ProviderMarkerRangeTests.reported.replacingOccurrences(of: "'", with: "&apos;")
+        let prefix = "<speak><prosody rate='100%'>"
+        let xml = prefix + encoded + "</prosody></speak>"
+        piper.synthesizeSSML(xml, speakerId: 0)
+        defer { piper.cancel() }
+
+        let deadline = Date().addingTimeInterval(60)
+        while !piper.completed(), piper.status != .error, Date() < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        try #require(piper.completed())
+        #expect(delegate.sampleCount > 0)
+        let markers = delegate.allMarkers.flatMap { $0 }.filter { $0.type == .word }
+        let words = encoded.split(separator: " ").map(String.init)
+        try #require(markers.count == words.count)
+        let raw = xml as NSString
+        var end = prefix.utf16.count
+        for (marker, word) in zip(markers, words) {
+            let full = raw.range(of: word, options: .literal, range: NSRange(location: end, length: raw.length - end))
+            try #require(full.location != NSNotFound)
+            let core = word.trimmingCharacters(in: CharacterSet(charactersIn: ",."))
+            let trimmed = NSRange(location: full.location, length: core.utf16.count)
+            #expect(marker.range == full || marker.range == trimmed)
+            end = NSMaxRange(full)
+        }
+    }
+
     @Test("Piper synthesizes SSML and notifies delegate")
     func testSSMLSynthesis() async throws {
         let piper = try Piper(
